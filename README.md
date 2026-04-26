@@ -1,3 +1,65 @@
+Native MiniMax M2.7 Integration for GBrain (Updated)
+GBrain currently hard-codes OpenAI for embeddings and Anthropic for LLM chat/tool-use. This plan adds a provider-agnostic layer so any OpenAI-compatible API (MiniMax, OpenRouter, etc.) can power the full stack — chat, tool use, embeddings, and search expansion.
+
+MiniMax M2.7 is the first target. The design accommodates future providers.
+
+Decisions (from user feedback)
+✅ MiniMax API key is available
+✅ Provider-agnostic design — MiniMax first, OpenRouter later
+✅ Full embedding support (not just chat) — configurable model + dimensions
+Proposed Changes
+Component 1: Provider Config & Client Factory
+[NEW] 
+llm-provider.ts
+Provider-agnostic config and client factory. Uses the existing openai npm package with configurable baseURL:
+
+typescript
+interface LLMProviderConfig {
+  baseURL: string;           // https://api.minimax.io/v1
+  apiKey: string;
+  chatModel: string;         // MiniMax-M2.7
+  embeddingModel: string;    // embo-01
+  embeddingDimensions?: number;
+  expansionModel?: string;   // cheaper model for query expansion
+}
+Auto-detection: MINIMAX_API_KEY → MiniMax defaults. Falls back to OpenAI/Anthropic if not set.
+
+[MODIFY] 
+config.ts
+Add minimax_api_key, llm_provider fields. Env vars: MINIMAX_API_KEY, GBRAIN_LLM_PROVIDER, GBRAIN_LLM_BASE_URL.
+
+Component 2: OpenAI-Compatible Adapter for Subagent
+[NEW] 
+openai-adapter.ts
+Adapter that implements the existing MessagesClient interface from subagent.ts but internally uses the OpenAI SDK:
+
+Anthropic.MessageCreateParamsNonStreaming → OpenAI ChatCompletionCreateParams
+OpenAI ChatCompletion → Anthropic.Message
+The subagent handler's main loop stays unchanged — it calls client.create() and gets back what looks like an Anthropic response.
+
+[MODIFY] 
+subagent.ts
+SubagentDeps gains optional provider field
+When provider is not anthropic, use the OpenAI adapter as the MessagesClient
+DEFAULT_MODEL switches based on provider
+Component 3: Embedding Provider
+[MODIFY] 
+embedding.ts
+Use getLLMProvider() to get the configured client/model
+When MiniMax: use OpenAI SDK → api.minimax.io/v1 with model embo-01
+Dimensions configurable via provider config
+EMBEDDING_MODEL and EMBEDDING_DIMENSIONS become dynamic
+Component 4: Search Expansion
+[MODIFY] 
+expansion.ts
+When provider is OpenAI-compatible (MiniMax, OpenRouter), use the OpenAI SDK with function calling
+Same expand_query tool definition, just in OpenAI format
+Falls back to keyword-only if no provider configured
+Component 5: Worker Wiring
+[MODIFY] 
+jobs.ts
+Pass resolved provider to makeSubagentHandler
+
 # GBrain
 
 Your AI agent is smart but forgetful. GBrain gives it a brain.
