@@ -8,22 +8,37 @@
  */
 
 import OpenAI from 'openai';
+import { getLLMProvider, getProviderClient } from './llm-provider.ts';
 
-const MODEL = 'text-embedding-3-large';
-const DIMENSIONS = 1536;
+const DEFAULT_MODEL = 'text-embedding-3-large';
+const DEFAULT_DIMENSIONS = 1536;
 const MAX_CHARS = 8000;
 const MAX_RETRIES = 5;
 const BASE_DELAY_MS = 4000;
 const MAX_DELAY_MS = 120000;
 const BATCH_SIZE = 100;
 
-let client: OpenAI | null = null;
+let fallbackClient: OpenAI | null = null;
 
+/** Resolve the embedding model name from the active provider or default. */
+function getEmbeddingModel(): string {
+  return getLLMProvider()?.embeddingModel ?? DEFAULT_MODEL;
+}
+
+/** Resolve the embedding dimensions from the active provider or default. */
+function getEmbeddingDimensions(): number {
+  return getLLMProvider()?.embeddingDimensions ?? DEFAULT_DIMENSIONS;
+}
+
+/** Get the OpenAI client for embedding calls. Uses the provider client if available. */
 function getClient(): OpenAI {
-  if (!client) {
-    client = new OpenAI();
+  const providerClient = getProviderClient();
+  if (providerClient) return providerClient;
+  // Fallback: direct OpenAI client (legacy path).
+  if (!fallbackClient) {
+    fallbackClient = new OpenAI();
   }
-  return client;
+  return fallbackClient;
 }
 
 export async function embed(text: string): Promise<Float32Array> {
@@ -63,9 +78,9 @@ async function embedBatchWithRetry(texts: string[]): Promise<Float32Array[]> {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const response = await getClient().embeddings.create({
-        model: MODEL,
+        model: getEmbeddingModel(),
         input: texts,
-        dimensions: DIMENSIONS,
+        dimensions: getEmbeddingDimensions(),
       });
 
       // Sort by index to maintain order
@@ -104,7 +119,19 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export { MODEL as EMBEDDING_MODEL, DIMENSIONS as EMBEDDING_DIMENSIONS };
+/** Dynamic embedding model — reads from active provider config. */
+export function getActiveEmbeddingModel(): string {
+  return getEmbeddingModel();
+}
+
+/** Dynamic embedding dimensions — reads from active provider config. */
+export function getActiveEmbeddingDimensions(): number {
+  return getEmbeddingDimensions();
+}
+
+/** Legacy named exports for backward compat — still used by tests and CLAUDE.md references. */
+export const EMBEDDING_MODEL = DEFAULT_MODEL;
+export const EMBEDDING_DIMENSIONS = DEFAULT_DIMENSIONS;
 
 /**
  * v0.20.0 Cathedral II Layer 8 (D1): USD cost per 1k tokens for

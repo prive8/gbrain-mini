@@ -29,6 +29,14 @@ export interface GBrainConfig {
   database_path?: string;
   openai_api_key?: string;
   anthropic_api_key?: string;
+  /** MiniMax API key (also read from MINIMAX_API_KEY env var). */
+  minimax_api_key?: string;
+  /**
+   * LLM provider selection. When set, overrides auto-detection.
+   * Values: 'anthropic' | 'minimax' | 'openai' | 'custom'
+   * Also read from GBRAIN_LLM_PROVIDER env var.
+   */
+  llm_provider?: string;
   /**
    * Optional storage backend config (S3/Supabase/local). Shape matches
    * `StorageConfig` in `./storage.ts`. Typed as `unknown` here to avoid
@@ -64,6 +72,8 @@ export function loadConfig(): GBrainConfig | null {
     engine: inferredEngine,
     ...(dbUrl ? { database_url: dbUrl } : {}),
     ...(process.env.OPENAI_API_KEY ? { openai_api_key: process.env.OPENAI_API_KEY } : {}),
+    ...(process.env.MINIMAX_API_KEY ? { minimax_api_key: process.env.MINIMAX_API_KEY } : {}),
+    ...(process.env.GBRAIN_LLM_PROVIDER ? { llm_provider: process.env.GBRAIN_LLM_PROVIDER } : {}),
   };
   return merged as GBrainConfig;
 }

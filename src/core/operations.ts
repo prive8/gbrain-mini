@@ -275,7 +275,8 @@ const put_page: Operation = {
     // try/catch around embed only catches; without a key the OpenAI client would
     // attempt 5 retries with exponential backoff (up to ~2 minutes total) before
     // giving up. Detect early.
-    const noEmbed = !process.env.OPENAI_API_KEY;
+    const { hasEmbeddingProvider } = await import('./llm-provider.ts');
+    const noEmbed = !hasEmbeddingProvider();
     const result = await importFromContent(ctx.engine, slug, p.content as string, { noEmbed });
 
     // Auto-link post-hook: runs AFTER importFromContent (which is its own

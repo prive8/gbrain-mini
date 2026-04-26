@@ -939,13 +939,13 @@ export async function registerBuiltinHandlers(worker: MinionWorker, engine: Brai
     }
   }
 
-  // v0.15 subagent handlers: always-on. Unlike shell (which needs an env
-  // flag because of RCE surface), subagent only calls the Anthropic API
-  // with the operator's own ANTHROPIC_API_KEY — no key, the SDK call
-  // fails immediately. Who-can-submit is already gated by
-  // PROTECTED_JOB_NAMES + TrustedSubmitOpts (MCP can't submit subagent
-  // jobs; only the CLI path with allowProtectedSubmit can). No separate
-  // cost-ceremony env flag needed.
+  // v0.15 subagent handlers: always-on. Provider-agnostic — when MiniMax,
+  // OpenRouter, or another OpenAI-compatible provider is configured
+  // (MINIMAX_API_KEY / GBRAIN_LLM_PROVIDER), the adapter translates
+  // to the OpenAI chat completions format. Falls back to Anthropic SDK
+  // when ANTHROPIC_API_KEY is the active provider. Who-can-submit is
+  // gated by PROTECTED_JOB_NAMES + TrustedSubmitOpts (MCP can't submit
+  // subagent jobs; only the CLI path with allowProtectedSubmit can).
   const { makeSubagentHandler } = await import('../core/minions/handlers/subagent.ts');
   const { subagentAggregatorHandler } = await import('../core/minions/handlers/subagent-aggregator.ts');
   worker.register('subagent', makeSubagentHandler({ engine }));

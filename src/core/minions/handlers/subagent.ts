@@ -46,6 +46,8 @@ import {
   logSubagentSubmission,
   logSubagentHeartbeat,
 } from './subagent-audit.ts';
+import { isAnthropicProvider, getLLMProvider } from '../../llm-provider.ts';
+import { createProviderMessagesClient } from '../../openai-adapter.ts';
 
 // ── Defaults ────────────────────────────────────────────────
 
@@ -126,15 +128,45 @@ interface PersistedToolExec {
  */
 export function makeSubagentHandler(deps: SubagentDeps) {
   const engine = deps.engine;
-  // sdk.messages IS the MessagesClient-shaped object. The v0.16.0 bug was
-  // casting new Anthropic() (top level) to MessagesClient, but .create()
-  // lives at sdk.messages.create. Assigning sdk.messages directly gets the
-  // right object; JS method-call semantics preserve `this` at the call
-  // site (subagent.ts invokes client.create(...) with client === sdk.messages).
-  const makeAnthropic = deps.makeAnthropic ?? (() => new Anthropic());
-  const client: MessagesClient = deps.client ?? makeAnthropic().messages;
+  // Resolve the LLM provider. If a non-Anthropic provider is active
+  // (MiniMax, OpenRouter, etc.), use the OpenAI-compatible adapter.
+  // Otherwise fall back to the legacy Anthropic SDK path.
+  const llmProvider = getLLMProvider();
+  const useOpenAIAdapter = !isAnthropicProvider() && llmProvider !== null;
+
+  let client: MessagesClient;
+  if (deps.client) {
+    // Explicit client override (tests, custom integrations).
+    client = deps.client;
+  } else if (useOpenAIAdapter) {
+    // Provider-agnostic path: MiniMax, OpenRouter, etc.
+    const adapterClient = createProviderMessagesClient();
+    if (adapterClient) {
+      client = adapterClient;
+    } else {
+      // Fallback to Anthropic if adapter creation fails.
+      const makeAnthropic = deps.makeAnthropic ?? (() => new Anthropic());
+      client = makeAnthropic().messages;
+    }
+  } else {
+    // Legacy Anthropic path.
+    const makeAnthropic = deps.makeAnthropic ?? (() => new Anthropic());
+    client = makeAnthropic().messages;
+  }
+
+  // Resolve default model based on provider.
+  const providerDefaultModel = useOpenAIAdapter && llmProvider
+    ? llmProvider.chatModel
+    : DEFAULT_MODEL;
+
+  // Resolve rate-lease key based on provider.
+  const rateLeaseKey = deps.rateLeaseKey ?? (
+    useOpenAIAdapter && llmProvider
+      ? `${llmProvider.provider}:messages`
+      : DEFAULT_RATE_KEY
+  );
+
   const config = deps.config ?? loadConfig() ?? ({ engine: 'postgres' } as GBrainConfig);
-  const rateLeaseKey = deps.rateLeaseKey ?? DEFAULT_RATE_KEY;
   const maxConcurrent = deps.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
   const leaseTtlMs = deps.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
 
@@ -144,7 +176,7 @@ export function makeSubagentHandler(deps: SubagentDeps) {
       throw new Error('subagent job data.prompt is required (string)');
     }
 
-    const model = data.model ?? DEFAULT_MODEL;
+    const model = data.model ?? providerDefaultModel;
     const maxTurns = data.max_turns ?? DEFAULT_MAX_TURNS;
     const systemPrompt = data.system ?? DEFAULT_SYSTEM;
 
