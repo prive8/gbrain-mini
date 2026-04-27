@@ -17,8 +17,8 @@ import { existsSync, unlinkSync } from 'fs';
 
 let lintCalls: Array<{ target: string; fix: boolean; dryRun: boolean | undefined }> = [];
 let backlinksCalls: Array<{ action: string; dir: string; dryRun: boolean | undefined }> = [];
-let syncCalls: Array<{ dryRun: boolean | undefined; noPull: boolean | undefined }> = [];
-let extractCalls: Array<{ mode: string; dir: string }> = [];
+let syncCalls: Array<{ dryRun: boolean | undefined; noPull: boolean | undefined; noExtract: boolean | undefined }> = [];
+let extractCalls: Array<{ mode: string; dir: string; slugs: string[] | undefined }> = [];
 let embedCalls: Array<{ stale: boolean | undefined; dryRun: boolean | undefined }> = [];
 let orphansCalls: number = 0;
 
@@ -49,7 +49,7 @@ mock.module('../../src/commands/backlinks.ts', () => ({
 // Mock sync
 mock.module('../../src/commands/sync.ts', () => ({
   performSync: async (_engine: any, opts: any) => {
-    syncCalls.push({ dryRun: opts.dryRun, noPull: opts.noPull });
+    syncCalls.push({ dryRun: opts.dryRun, noPull: opts.noPull, noExtract: opts.noExtract });
     return {
       status: opts.dryRun ? 'dry_run' : 'synced',
       fromCommit: 'abcd',
@@ -72,8 +72,8 @@ mock.module('../../src/commands/sync.ts', () => ({
 // Mock extract
 mock.module('../../src/commands/extract.ts', () => ({
   runExtractCore: async (_engine: any, opts: any) => {
-    extractCalls.push({ mode: opts.mode, dir: opts.dir });
-    return { links_created: 7, timeline_entries_created: 3, pages_processed: 5 };
+    extractCalls.push({ mode: opts.mode, dir: opts.dir, slugs: opts.slugs });
+    return { links_created: 7, timeline_entries_created: 3, pages_processed: opts.slugs?.length ?? 5 };
   },
   walkMarkdownFiles: () => [],
   extractMarkdownLinks: () => [],
@@ -390,5 +390,65 @@ describe('runCycle — yieldBetweenPhases hook', () => {
     });
     // Cycle still completed all phases.
     expect(report.phases.length).toBe(6);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Wave regression guards (#417 + Codex F2)
+// ─────────────────────────────────────────────────────────────────
+
+describe('runCycle — incremental extract slug propagation (#417)', () => {
+  beforeEach(async () => {
+    await truncateCycleLocks(sharedEngine);
+    syncCalls = [];
+    extractCalls = [];
+  });
+
+  test('cycle threads sync.pagesAffected into extract phase as the slugs argument', async () => {
+    // performSync mock returns pagesAffected = ['a', 'b']. The extract phase
+    // must receive those exact slugs, not undefined (which would trigger a full walk).
+    await runCycle(sharedEngine, { brainDir: '/tmp/brain' });
+
+    // Sync ran once
+    expect(syncCalls.length).toBe(1);
+    // Extract ran once with the slugs from sync (not undefined)
+    expect(extractCalls.length).toBe(1);
+    expect(extractCalls[0].slugs).toEqual(['a', 'b']);
+  });
+
+  test('extract phase falls back to full walk when sync was skipped (slugs undefined)', async () => {
+    // Run only the extract phase — sync didn't run, so syncPagesAffected
+    // is undefined and extract should walk the full directory (slugs:undefined).
+    await runCycle(sharedEngine, { brainDir: '/tmp/brain', phases: ['extract'] });
+
+    expect(syncCalls.length).toBe(0);
+    expect(extractCalls.length).toBe(1);
+    expect(extractCalls[0].slugs).toBeUndefined();
+  });
+});
+
+describe('runCycle — Codex F2: noExtract is gated on whether extract phase runs', () => {
+  beforeEach(async () => {
+    await truncateCycleLocks(sharedEngine);
+    syncCalls = [];
+    extractCalls = [];
+  });
+
+  test('full cycle (sync + extract): noExtract=true so sync skips inline extraction (extract phase handles it)', async () => {
+    await runCycle(sharedEngine, { brainDir: '/tmp/brain', phases: ['sync', 'extract'] });
+
+    expect(syncCalls.length).toBe(1);
+    expect(syncCalls[0].noExtract).toBe(true);  // dedupe enabled
+    expect(extractCalls.length).toBe(1);        // extract phase ran
+  });
+
+  test('phases:[sync] only: noExtract=false so sync runs inline extraction (no silent extract drop)', async () => {
+    await runCycle(sharedEngine, { brainDir: '/tmp/brain', phases: ['sync'] });
+
+    expect(syncCalls.length).toBe(1);
+    // Critical: noExtract must be false here. If it were true, the user just lost
+    // their extraction without any indication. This is the F2 regression guard.
+    expect(syncCalls[0].noExtract).toBe(false);
+    expect(extractCalls.length).toBe(0); // extract phase did NOT run
   });
 });
