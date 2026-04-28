@@ -2,6 +2,28 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.22.4-minimax.1] - 2026-04-27
+
+## MiniMax M2.7 provider layer — forked from garrytan/gbrain
+
+### Added
+
+- **Provider-agnostic LLM config** (`src/core/llm-provider.ts`) — MiniMax, OpenAI, and custom OpenAI-compatible APIs via env vars. Auto-detects `MINIMAX_API_KEY`. Configurable via `GBRAIN_LLM_PROVIDER`, `GBRAIN_CHAT_MODEL`, `GBRAIN_EMBEDDING_MODEL`, `GBRAIN_EMBEDDING_DIMENSIONS`, `GBRAIN_EXPANSION_MODEL`.
+- **OpenAI-compatible subagent adapter** (`src/core/openai-adapter.ts`) — translates Anthropic messages API calls to OpenAI SDK format. Includes `<think>` tag stripping for MiniMax reasoning output. Drop-in replacement for the Anthropic SDK path.
+- **Dynamic embedding provider** — `src/core/embedding.ts` now uses `getLLMProvider()` for model and dimensions. Supports embo-01 at configurable dimensions.
+- **MiniMax query expansion** — `src/core/search/expansion.ts` wired to OpenAI-compatible provider layer with input sanitization.
+
+### Changed
+
+- `src/core/config.ts` — added `minimax_api_key` field and `llm_provider` config option.
+
+### Notes
+
+- Forked from `garrytan/gbrain` v0.22.4 (2026-04-26) by prive8.
+- Intended as a standalone test bed for MiniMax M2.7 integration outside OpenClaw.
+
+# Changelog
+
 ## [0.22.4] - 2026-04-26
 
 ## **Frontmatter-guard ships. Broken brain pages can't hide.**
